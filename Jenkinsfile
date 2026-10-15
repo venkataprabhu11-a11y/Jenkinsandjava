@@ -14,21 +14,36 @@ pipeline {
 
     stages {
         stage('Install AWS CLI') {
-            steps {
-                script {
-                    sh '''
-                        set -e
-                        echo "Installing AWS CLI..."
-                        sudo apt update && sudo apt install -y unzip curl
+         steps {
+        sh '''
+            set -eu
 
-                        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                        rm -rf aws
-                        unzip -q awscliv2.zip
-                        sudo ./aws/install --update
-                        aws --version
-                    '''
-                }
-            }
+            if command -v aws >/dev/null 2>&1; then
+                aws --version
+            else
+                echo "Installing AWS CLI locally..."
+
+                mkdir -p "$HOME/.local/bin"
+                cd "$WORKSPACE"
+
+                curl -fsSL \
+                  "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" \
+                  -o awscliv2.zip
+
+                unzip -oq awscliv2.zip
+
+                ./aws/install \
+                  --install-dir "$HOME/.local/aws-cli" \
+                  --bin-dir "$HOME/.local/bin"
+
+                rm -rf aws awscliv2.zip
+
+                "$HOME/.local/bin/aws" --version
+            fi
+        '''
+    }
+}
+
         }
 
              stage('Configure AWS Credentials') {
