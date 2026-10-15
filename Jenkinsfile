@@ -82,30 +82,41 @@ pipeline {
             }
         }
 
-        stage('Login to AWS ECR') {
-            steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'aws-credentials',
-                        usernameVariable: 'AWS_ACCESS_KEY_ID',
-                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                    )
-                ]) {
-                    sh '''
-                        set -e
-                        export PATH="$HOME/.local/bin:$PATH"
+        
+stage('Login to AWS ECR') {
+    steps {
+        withCredentials([
+            usernamePassword(
+                credentialsId: 'aws-credentials',
+                usernameVariable: 'AWS_ACCESS_KEY_ID',
+                passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+            )
+        ]) {
+            sh '''
+                set -eu
+                export PATH="$HOME/.local/bin:$PATH"
+                export AWS_DEFAULT_REGION="$AWS_REGION"
 
-                        echo "Logging into private AWS ECR..."
+                echo "Checking AWS identity..."
+                aws sts get-caller-identity
 
-                        aws ecr get-login-password \
-                            --region "$AWS_REGION" |
-                            docker login \
-                                --username AWS \
-                                --password-stdin "$ECR_REGISTRY"
-                    '''
-                }
-            }
+                echo "Checking ECR authorization..."
+                aws ecr get-login-password \
+                    --region "$AWS_REGION" \
+                    > "$WORKSPACE@tmp/ecr-password"
+
+                echo "Logging into private AWS ECR..."
+                docker login \
+                    --username AWS \
+                    --password-stdin "$ECR_REGISTRY" \
+                    < "$WORKSPACE@tmp/ecr-password"
+
+                rm -f "$WORKSPACE@tmp/ecr-password"
+            '''
         }
+    }
+}
+
 
         stage('Build Docker Image') {
             steps {
