@@ -16,30 +16,32 @@ pipeline {
         stage('Install AWS CLI') {
          steps {
         sh '''
-            set -eu
+            set -e
+            echo "Installing AWS CLI..."
 
-            if command -v aws >/dev/null 2>&1; then
-                aws --version
-            else
-                echo "Installing AWS CLI locally..."
+            mkdir -p "$HOME/.local/bin"
 
-                mkdir -p "$HOME/.local/bin"
-                cd "$WORKSPACE"
-
-                curl -fsSL \
-                  "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" \
-                  -o awscliv2.zip
-
-                unzip -oq awscliv2.zip
-
-                ./aws/install \
-                  --install-dir "$HOME/.local/aws-cli" \
-                  --bin-dir "$HOME/.local/bin"
-
-                rm -rf aws awscliv2.zip
-
-                "$HOME/.local/bin/aws" --version
+            if ! command -v curl >/dev/null 2>&1 || \
+               ! command -v unzip >/dev/null 2>&1; then
+                echo "ERROR: curl and unzip must already be installed."
+                exit 1
             fi
+
+            curl -fsSL \
+                "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" \
+                -o "$HOME/awscliv2.zip"
+
+            rm -rf "$HOME/aws" "$HOME/.local/aws-cli"
+            unzip -q "$HOME/awscliv2.zip" -d "$HOME"
+
+            "$HOME/aws/install" \
+                --install-dir "$HOME/.local/aws-cli" \
+                --bin-dir "$HOME/.local/bin"
+
+            rm -rf "$HOME/aws" "$HOME/awscliv2.zip"
+
+            export PATH="$HOME/.local/bin:$PATH"
+            aws --version
         '''
     }
 }
