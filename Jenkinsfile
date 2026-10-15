@@ -3,66 +3,68 @@ pipeline {
     agent any
 
     environment {
-        GIT_REPO = 'https://github.com/venkataprabhu11-a11y/Jenkinsandjava.git'
-        AWS_REGION = 'ap-south-2'
+        GIT_REPO      = 'https://github.com/venkataprabhu11-a11y/Jenkinsandjava.git'
+        AWS_REGION    = 'ap-south-2'
         ECR_REPO_NAME = 'sample-project1'
-        ECR_PUBLIC_REPO_URI = '492715478536.dkr.ecr.ap-south-2.amazonaws.com/sample-project1'
-        IMAGE_TAG = 'latest'
-        AWS_ACCOUNT_ID = '492715478536'
-        IMAGE_URI = "${ECR_PUBLIC_REPO_URI}:${IMAGE_TAG}"
+        ECR_REGISTRY  = '492715478536.dkr.ecr.ap-south-2.amazonaws.com'
+        IMAGE_TAG     = 'latest'
+        IMAGE_URI     = "${ECR_REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}"
     }
 
     stages {
         stage('Install AWS CLI') {
-         steps {
-        sh '''
-            set -e
-            echo "Installing AWS CLI..."
+            steps {
+                sh '''
+                    set -e
+                    echo "Installing AWS CLI..."
 
-            mkdir -p "$HOME/.local/bin"
+                    mkdir -p "$HOME/.local/bin"
 
-            if ! command -v curl >/dev/null 2>&1 || \
-               ! command -v unzip >/dev/null 2>&1; then
-                echo "ERROR: curl and unzip must already be installed."
-                exit 1
-            fi
+                    if ! command -v curl >/dev/null 2>&1 || \
+                       ! command -v unzip >/dev/null 2>&1; then
+                        echo "ERROR: curl and unzip must already be installed."
+                        exit 1
+                    fi
 
-            curl -fsSL \
-                "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" \
-                -o "$HOME/awscliv2.zip"
+                    curl -fsSL \
+                        "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" \
+                        -o "$HOME/awscliv2.zip"
 
-            rm -rf "$HOME/aws" "$HOME/.local/aws-cli"
-            unzip -q "$HOME/awscliv2.zip" -d "$HOME"
+                    rm -rf "$HOME/aws" "$HOME/.local/aws-cli"
+                    unzip -q "$HOME/awscliv2.zip" -d "$HOME"
 
-            "$HOME/aws/install" \
-                --install-dir "$HOME/.local/aws-cli" \
-                --bin-dir "$HOME/.local/bin"
+                    "$HOME/aws/install" \
+                        --install-dir "$HOME/.local/aws-cli" \
+                        --bin-dir "$HOME/.local/bin"
 
-            rm -rf "$HOME/aws" "$HOME/awscliv2.zip"
+                    rm -rf "$HOME/aws" "$HOME/awscliv2.zip"
 
-            export PATH="$HOME/.local/bin:$PATH"
-            aws --version
-        '''
-    }
-}
-
+                    export PATH="$HOME/.local/bin:$PATH"
+                    aws --version
+                '''
+            }
         }
 
-             stage('Configure AWS Credentials') {
-    steps {
-        script {
-            sh '''
-            echo "Setting up AWS credentials for Jenkins..."
-            mkdir -p /var/lib/jenkins/.aws
-            echo "[default]" > /var/lib/jenkins/.aws/credentials
-            echo "aws_access_key_id=AKIAWN26KB25BRBD26NF" >> /var/lib/jenkins/.aws/credentials
-            echo "aws_secret_access_key=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" >> /var/lib/jenkins/.aws/credentials
-            chown -R jenkins:jenkins /var/lib/jenkins/.aws
-            '''
-        }
-    }
-}
+        stage('Configure AWS Credentials') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-credentials',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
+                    sh '''
+                        set -e
+                        export PATH="$HOME/.local/bin:$PATH"
+                        export AWS_DEFAULT_REGION="$AWS_REGION"
 
+                        echo "Checking AWS credentials..."
+                        aws sts get-caller-identity
+                    '''
+                }
+            }
+        }
 
         stage('Clone Repository') {
             steps {
@@ -72,21 +74,34 @@ pipeline {
 
         stage('Build') {
             steps {
-                script {
-                    sh '''
-                        echo "Building Java application..."
-                        mvn clean -B -Denforcer.skip=true package
-                    '''
-                }
+                sh '''
+                    set -e
+                    echo "Building Java application..."
+                    mvn clean -B -Denforcer.skip=true package
+                '''
             }
         }
 
         stage('Login to AWS ECR') {
             steps {
-                script {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-credentials',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
                     sh '''
-                        echo "Logging into AWS ECR..."
-                        aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
+                        set -e
+                        export PATH="$HOME/.local/bin:$PATH"
+
+                        echo "Logging into private AWS ECR..."
+
+                        aws ecr get-login-password \
+                            --region "$AWS_REGION" |
+                            docker login \
+                                --username AWS \
+                                --password-stdin "$ECR_REGISTRY"
                     '''
                 }
             }
@@ -94,35 +109,36 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                script {
-                    sh '''
-                        echo "Building Docker image..."
-                        docker build -t ${IMAGE_URI} .
-                    '''
-                }
+                sh '''
+                    set -e
+                    echo "Building Docker image..."
+                    docker build -t "$IMAGE_URI" .
+                '''
             }
         }
 
         stage('Push Docker Image to ECR') {
             steps {
-                script {
-                    sh '''
-                        echo "Pushing Docker image to ECR..."
-                        docker push ${IMAGE_URI}
-                    '''
-                }
+                sh '''
+                    set -e
+                    echo "Pushing Docker image to ECR..."
+                    docker push "$IMAGE_URI"
+                '''
             }
         }
-
-      
     }
-    
+
     post {
         success {
-            echo "Docker image pushed to ECR successfully and deployed."
+            echo 'Docker image pushed to ECR successfully.'
         }
+
         failure {
-            echo "Pipeline failed."
+            echo 'Pipeline failed. Check the console output above.'
+        }
+
+        always {
+            sh 'docker logout "$ECR_REGISTRY" || true'
         }
     }
 }
